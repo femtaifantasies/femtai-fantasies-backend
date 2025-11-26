@@ -1,0 +1,316 @@
+// Prisma Schema for Femtai Fantasies
+// PostgreSQL database schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Card {
+  id          String   @id @default(uuid())
+  imageUrl    String   @db.Text
+  title       String
+  description String   @db.Text
+  type        String
+  cost        Float
+  character   String?
+  
+  // Attributes stored as JSON
+  attributes  Json // { mana, resistance, charm, devotion }
+  
+  // Relations
+  setCards    SetCard[]
+  userCards   UserCard[]
+  tradesOffered TradeProposal[] @relation("CardOffered")
+  tradesRequested TradeProposal[] @relation("CardRequested")
+  savedChats  SavedChat[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([character])
+  @@index([type])
+  @@map("cards")
+}
+
+model CardSet {
+  id            String   @id @default(uuid())
+  name          String
+  description   String   @db.Text
+  imageUrl      String   @db.Text
+  coverImageUrl String?  @db.Text
+  cost          Float
+  costPerCard   Float
+  type          String?
+  mana          Int?
+  character     String?
+  
+  // Relations
+  setCards      SetCard[]
+  userSets      UserSet[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([character])
+  @@index([type])
+  @@map("card_sets")
+}
+
+// Junction table for many-to-many relationship between Sets and Cards
+model SetCard {
+  id        String   @id @default(uuid())
+  setId     String
+  cardId    String
+  
+  set       CardSet  @relation(fields: [setId], references: [id], onDelete: Cascade)
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([setId, cardId])
+  @@index([setId])
+  @@index([cardId])
+  @@map("set_cards")
+}
+
+model Character {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  coverImageUrl String?  @db.Text
+  description   String?  @db.Text
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@map("characters")
+}
+
+model User {
+  id                  String   @id @default(uuid())
+  email               String   @db.Text // Encrypted
+  username            String?  @db.Text // Encrypted
+  passwordHash        String   @db.Text
+  profileImageUrl     String?  @db.Text
+  bio                 String?  @db.Text // Encrypted
+  interests           String?  @db.Text // Encrypted
+  location            String?  @db.Text // Encrypted
+  website             String?  @db.Text
+  ageVerifiedAt       DateTime?
+  isAdmin             String?  @db.Text // Encrypted boolean
+  
+  // Token management
+  manaReloadTokens    Int      @default(0)
+  manaIncreaseTokens  Int      @default(0)
+  lastLoginDate       String?  // YYYY-MM-DD format
+  
+  // Relations
+  collectionCards     UserCard[]
+  collectionSets      UserSet[]
+  tradesSent          TradeProposal[] @relation("TradeFrom")
+  tradesReceived      TradeProposal[] @relation("TradeTo")
+  messagesSent        Message[] @relation("MessageFrom")
+  messagesReceived    Message[] @relation("MessageTo")
+  reportsMade         UserReport[] @relation("Reporter")
+  reportsReceived     UserReport[] @relation("Reported")
+  notifications       Notification[]
+  savedChats          SavedChat[]
+  friendRequestsSent  FriendRequest[] @relation("RequestFrom")
+  friendRequestsReceived FriendRequest[] @relation("RequestTo")
+  passwordResetTokens PasswordResetToken[]
+  
+  // Following/Friends (stored as JSON arrays for simplicity)
+  followingIds        String[] @default([])
+  friendIds           String[] @default([])
+  friendRequestIds    String[] @default([])
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@index([email])
+  @@map("users")
+}
+
+// Junction table for user card collection
+model UserCard {
+  id        String   @id @default(uuid())
+  userId    String
+  cardId    String
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, cardId])
+  @@index([userId])
+  @@index([cardId])
+  @@map("user_cards")
+}
+
+// Junction table for user set collection
+model UserSet {
+  id        String   @id @default(uuid())
+  userId    String
+  setId     String
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  set       CardSet  @relation(fields: [setId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, setId])
+  @@index([userId])
+  @@index([setId])
+  @@map("user_sets")
+}
+
+model TradeProposal {
+  id              String   @id @default(uuid())
+  fromUserId      String
+  toUserId        String
+  cardOfferedId   String
+  cardRequestedId String
+  status          String   @default("pending") // pending, accepted, declined, cancelled
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  fromUser        User     @relation("TradeFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser          User     @relation("TradeTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  cardOffered     Card     @relation("CardOffered", fields: [cardOfferedId], references: [id], onDelete: Cascade)
+  cardRequested   Card     @relation("CardRequested", fields: [cardRequestedId], references: [id], onDelete: Cascade)
+  
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([status])
+  @@map("trades")
+}
+
+model Message {
+  id              String   @id @default(uuid())
+  fromUserId      String
+  toUserId        String
+  encryptedContent String  @db.Text // Encrypted message content
+  read            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  
+  fromUser        User     @relation("MessageFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser          User     @relation("MessageTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([read])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+model UserReport {
+  id          String   @id @default(uuid())
+  reportedUserId String
+  reporterUserId String
+  reason      String   @db.Text
+  status      String   @default("pending") // pending, reviewed, resolved
+  adminNotes  String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  reportedUser User    @relation("Reported", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  reporterUser User    @relation("Reporter", fields: [reporterUserId], references: [id], onDelete: Cascade)
+  
+  @@index([reportedUserId])
+  @@index([reporterUserId])
+  @@index([status])
+  @@map("reports")
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  type        String   // trade, message, new_card, new_collection, admin_alert, friend_request
+  title       String
+  message     String   @db.Text
+  read        Boolean  @default(false)
+  relatedId   String?  // Optional: trade ID, message ID, card ID, etc.
+  fromUserId  String?  // Optional: for trade/message/friend_request notifications
+  createdAt   DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([read])
+  @@index([type])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model SavedChat {
+  id              String   @id @default(uuid())
+  userId          String
+  cardId          String
+  characterName   String
+  cardTitle       String
+  encryptedMessages String @db.Text // Encrypted JSON string of messages
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card            Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([cardId])
+  @@index([createdAt])
+  @@map("saved_chats")
+}
+
+model FriendRequest {
+  id          String   @id @default(uuid())
+  fromUserId  String
+  toUserId    String
+  status      String   @default("pending") // pending, accepted, declined
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  fromUser    User     @relation("RequestFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser      User     @relation("RequestTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  
+  @@unique([fromUserId, toUserId])
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([status])
+  @@map("friend_requests")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+// Mana state for cards (separate from cards table for performance)
+model ManaState {
+  id              String   @id @default(uuid())
+  cardId          String   @unique
+  lastRechargeDate String  // YYYY-MM-DD format
+  currentMana     Int      @default(0)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([cardId])
+  @@index([lastRechargeDate])
+  @@map("mana_states")
+}
+
